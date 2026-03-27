@@ -1,0 +1,40 @@
+{
+  "name": "@openclaw/wework",
+  "version": "2026.1.29",
+  "type": "module",
+  "description": "OpenClaw WeWork channel plugin",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "channel": {
+      "id": "wework",
+      "label": "WeWork",
+      "selectionLabel": "WeWork (HTTP bridge)",
+      "docsPath": "/channels/wework",
+      "docsLabel": "wework",
+      "blurb": "Enterprise WeChat via local HTTP bridge.",
+      "aliases": [
+        "wecom",
+        "qywx"
+      ],
+      "order": 85,
+      "quickstartAllowFrom": true
+    },
+    "install": {
+      "npmSpec": "@openclaw/wework",
+      "localPath": "extensions/wework",
+      "defaultChoice": "npm"
+    }
+  },
+  "dependencies": {
+    "undici": "7.19.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.26"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  }
+}
