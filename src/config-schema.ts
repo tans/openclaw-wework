@@ -1,4 +1,4 @@
-import type { ChannelConfigSchema } from "openclaw/plugin-sdk";
+import type { ChannelConfigSchema } from "openclaw/plugin-sdk/channel-config-schema";
 
 const allowFromEntry = {
   anyOf: [{ type: "string" }, { type: "number" }],

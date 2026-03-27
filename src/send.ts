@@ -1,4 +1,4 @@
-import type { OpenClawConfig } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
 
 import { enqueueWeworkMessage } from "./api.js";
 import { resolveWeworkAccount } from "./accounts.js";

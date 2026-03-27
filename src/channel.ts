@@ -2,9 +2,12 @@ import path from "node:path";
 import type {
   ChannelAccountSnapshot,
   ChannelDock,
-  ChannelPlugin,
-  OpenClawConfig,
 } from "openclaw/plugin-sdk";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import {
+  createChannelPluginBase,
+  createChatChannelPlugin,
+} from "openclaw/plugin-sdk/core";
 import {
   applyAccountNameToChannelSection,
   DEFAULT_ACCOUNT_ID,
@@ -54,6 +57,20 @@ function isImagePath(raw: string): boolean {
   return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].includes(ext);
 }
 
+function resolveWeworkAllowFrom(cfg: OpenClawConfig, accountId?: string | null): string[] {
+  return (resolveWeworkAccount({ cfg, accountId }).config.allowFrom ?? []).map((entry) =>
+    String(entry),
+  );
+}
+
+function formatWeworkAllowFrom(allowFrom: Array<string | number>): string[] {
+  return allowFrom
+    .map((entry) => String(entry).trim())
+    .filter(Boolean)
+    .map((entry) => entry.replace(/^(wework|wecom|qywx|ww):/i, ""))
+    .map((entry) => entry.toLowerCase());
+}
+
 export const weworkDock: ChannelDock = {
   id: "wework",
   capabilities: {
@@ -64,16 +81,8 @@ export const weworkDock: ChannelDock = {
   outbound: { textChunkLimit: 2000 },
   config: {
     resolveAllowFrom: ({ cfg, accountId }) =>
-      (
-        resolveWeworkAccount({ cfg: cfg as OpenClawConfig, accountId }).config
-          .allowFrom ?? []
-      ).map((entry) => String(entry)),
-    formatAllowFrom: ({ allowFrom }) =>
-      allowFrom
-        .map((entry) => String(entry).trim())
-        .filter(Boolean)
-        .map((entry) => entry.replace(/^(wework|wecom|qywx|ww):/i, ""))
-        .map((entry) => entry.toLowerCase()),
+      resolveWeworkAllowFrom(cfg as OpenClawConfig, accountId),
+    formatAllowFrom: ({ allowFrom }) => formatWeworkAllowFrom(allowFrom),
   },
   groups: {
     resolveRequireMention: () => false,
@@ -83,62 +92,264 @@ export const weworkDock: ChannelDock = {
   },
 };
 
-export const weworkPlugin: ChannelPlugin<ResolvedWeworkAccount> = {
-  id: "wework",
-  meta,
-  onboarding: weworkOnboardingAdapter,
-  capabilities: {
-    chatTypes: ["direct", "group"],
-    media: true,
-    reactions: false,
-    threads: false,
-    polls: false,
-    nativeCommands: false,
-    blockStreaming: true,
-  },
-  reload: { configPrefixes: ["channels.wework"] },
-  configSchema: weworkConfigSchema,
-  config: {
-    listAccountIds: (cfg) => listWeworkAccountIds(cfg as OpenClawConfig),
-    resolveAccount: (cfg, accountId) =>
-      resolveWeworkAccount({ cfg: cfg as OpenClawConfig, accountId }),
-    defaultAccountId: (cfg) =>
-      resolveDefaultWeworkAccountId(cfg as OpenClawConfig),
-    setAccountEnabled: ({ cfg, accountId, enabled }) =>
-      setAccountEnabledInConfigSection({
-        cfg: cfg as OpenClawConfig,
-        sectionKey: "wework",
-        accountId,
-        enabled,
-        allowTopLevel: true,
+export const weworkPlugin = createChatChannelPlugin<ResolvedWeworkAccount>({
+  base: createChannelPluginBase({
+    id: "wework",
+    meta,
+    onboarding: weworkOnboardingAdapter,
+    capabilities: {
+      chatTypes: ["direct", "group"],
+      media: true,
+      reactions: false,
+      threads: false,
+      polls: false,
+      nativeCommands: false,
+      blockStreaming: true,
+    },
+    reload: { configPrefixes: ["channels.wework"] },
+    configSchema: weworkConfigSchema,
+    config: {
+      listAccountIds: (cfg) => listWeworkAccountIds(cfg as OpenClawConfig),
+      resolveAccount: (cfg, accountId) =>
+        resolveWeworkAccount({ cfg: cfg as OpenClawConfig, accountId }),
+      defaultAccountId: (cfg) =>
+        resolveDefaultWeworkAccountId(cfg as OpenClawConfig),
+      setAccountEnabled: ({ cfg, accountId, enabled }) =>
+        setAccountEnabledInConfigSection({
+          cfg: cfg as OpenClawConfig,
+          sectionKey: "wework",
+          accountId,
+          enabled,
+          allowTopLevel: true,
+        }),
+      deleteAccount: ({ cfg, accountId }) =>
+        deleteAccountFromConfigSection({
+          cfg: cfg as OpenClawConfig,
+          sectionKey: "wework",
+          accountId,
+          clearBaseFields: ["baseUrl", "name"],
+        }),
+      isConfigured: (account) => Boolean(account.baseUrl?.trim()),
+      describeAccount: (account): ChannelAccountSnapshot => ({
+        accountId: account.accountId,
+        name: account.name,
+        enabled: account.enabled,
+        configured: Boolean(account.baseUrl?.trim()),
+        baseUrl: account.baseUrl,
       }),
-    deleteAccount: ({ cfg, accountId }) =>
-      deleteAccountFromConfigSection({
-        cfg: cfg as OpenClawConfig,
-        sectionKey: "wework",
-        accountId,
-        clearBaseFields: ["baseUrl", "name"],
+      resolveAllowFrom: ({ cfg, accountId }) =>
+        resolveWeworkAllowFrom(cfg as OpenClawConfig, accountId),
+      formatAllowFrom: ({ allowFrom }) => formatWeworkAllowFrom(allowFrom),
+    },
+    groups: {
+      resolveRequireMention: () => false,
+    },
+    actions: weworkMessageActions,
+    messaging: {
+      normalizeTarget: normalizeWeworkMessagingTarget,
+      targetResolver: {
+        looksLikeId: (raw) => {
+          const trimmed = raw.trim();
+          return Boolean(trimmed);
+        },
+        hint: "<conversationId>",
+      },
+    },
+    directory: {
+      self: async () => null,
+      listPeers: async ({ cfg, accountId, query, limit }) => {
+        const account = resolveWeworkAccount({
+          cfg: cfg as OpenClawConfig,
+          accountId,
+        });
+        const q = query?.trim().toLowerCase() || "";
+        const response = await listWeworkContacts({
+          accountId: account.accountId,
+          pageNum: 1,
+          pageSize: limit && limit > 0 ? limit : 50,
+        });
+        if (!response) return [];
+        const payload =
+          (response as { raw?: unknown; data?: unknown })?.raw ?? response;
+        const data = (payload as { data?: unknown })?.data as
+          | { user_list?: Array<{ conversation_id?: string; username?: string }> }
+          | undefined;
+        const peers = (data?.user_list ?? [])
+          .map((entry) => ({
+            id: entry.conversation_id ?? "",
+            name: entry.username ?? "",
+          }))
+          .filter((entry) => entry.id)
+          .filter((entry) =>
+            q
+              ? entry.id.toLowerCase().includes(q) ||
+                entry.name.toLowerCase().includes(q)
+              : true,
+          )
+          .slice(0, limit && limit > 0 ? limit : undefined)
+          .map(
+            (entry) =>
+              ({ kind: "user", id: entry.id, name: entry.name }) as const,
+          );
+        return peers;
+      },
+      listGroups: async ({ cfg, accountId, query, limit }) => {
+        const account = resolveWeworkAccount({
+          cfg: cfg as OpenClawConfig,
+          accountId,
+        });
+        const q = query?.trim().toLowerCase() || "";
+        const response = await listWeworkGroups({
+          accountId: account.accountId,
+          pageNum: 1,
+          pageSize: limit && limit > 0 ? limit : 50,
+        });
+        if (!response) return [];
+        const payload =
+          (response as { raw?: unknown; data?: unknown })?.raw ?? response;
+        const data = (payload as { data?: unknown })?.data as
+          | { room_list?: Array<{ conversation_id?: string; nickname?: string }> }
+          | undefined;
+        const groups = (data?.room_list ?? [])
+          .map((entry) => ({
+            id: entry.conversation_id ?? "",
+            name: entry.nickname ?? "",
+          }))
+          .filter((entry) => entry.id)
+          .filter((entry) =>
+            q
+              ? entry.id.toLowerCase().includes(q) ||
+                entry.name.toLowerCase().includes(q)
+              : true,
+          )
+          .slice(0, limit && limit > 0 ? limit : undefined)
+          .map(
+            (entry) =>
+              ({ kind: "group", id: entry.id, name: entry.name }) as const,
+          );
+        return groups;
+      },
+    },
+    setup: {
+      resolveAccountId: ({ accountId }) => normalizeAccountId(accountId),
+      applyAccountName: ({ cfg, accountId, name }) =>
+        applyAccountNameToChannelSection({
+          cfg: cfg as OpenClawConfig,
+          channelKey: "wework",
+          accountId,
+          name,
+        }),
+      validateInput: ({ input }) => {
+        if (!input.baseUrl) return null;
+        return null;
+      },
+      applyAccountConfig: ({ cfg, accountId, input }) => {
+        const namedConfig = applyAccountNameToChannelSection({
+          cfg: cfg as OpenClawConfig,
+          channelKey: "wework",
+          accountId,
+          name: input.name,
+        });
+        const next =
+          accountId !== DEFAULT_ACCOUNT_ID
+            ? migrateBaseNameToDefaultAccount({
+                cfg: namedConfig,
+                channelKey: "wework",
+              })
+            : namedConfig;
+        const existing = resolveWeworkAccount({
+          cfg: next as OpenClawConfig,
+          accountId,
+        });
+        const baseUrl = input.baseUrl?.trim() || existing.baseUrl;
+        if (accountId === DEFAULT_ACCOUNT_ID) {
+          return {
+            ...next,
+            channels: {
+              ...next.channels,
+              wework: {
+                ...next.channels?.wework,
+                enabled: true,
+                baseUrl,
+              },
+            },
+          } as OpenClawConfig;
+        }
+        return {
+          ...next,
+          channels: {
+            ...next.channels,
+            wework: {
+              ...next.channels?.wework,
+              enabled: true,
+              accounts: {
+                ...(next.channels?.wework?.accounts ?? {}),
+                [accountId]: {
+                  ...(next.channels?.wework?.accounts?.[accountId] ?? {}),
+                  enabled: true,
+                  baseUrl,
+                },
+              },
+            },
+          },
+        } as OpenClawConfig;
+      },
+    },
+    status: {
+      defaultRuntime: {
+        accountId: DEFAULT_ACCOUNT_ID,
+        running: false,
+        lastStartAt: null,
+        lastStopAt: null,
+        lastError: null,
+      },
+      collectStatusIssues: (accounts) => collectWeworkStatusIssues(accounts),
+      buildChannelSummary: ({ snapshot }) => ({
+        configured: snapshot.configured ?? false,
+        running: snapshot.running ?? false,
+        mode: snapshot.mode ?? "webhook",
+        lastStartAt: snapshot.lastStartAt ?? null,
+        lastStopAt: snapshot.lastStopAt ?? null,
+        lastError: snapshot.lastError ?? null,
+        probe: snapshot.probe,
+        lastProbeAt: snapshot.lastProbeAt ?? null,
       }),
-    isConfigured: (account) => Boolean(account.baseUrl?.trim()),
-    describeAccount: (account): ChannelAccountSnapshot => ({
-      accountId: account.accountId,
-      name: account.name,
-      enabled: account.enabled,
-      configured: Boolean(account.baseUrl?.trim()),
-      baseUrl: account.baseUrl,
-    }),
-    resolveAllowFrom: ({ cfg, accountId }) =>
-      (
-        resolveWeworkAccount({ cfg: cfg as OpenClawConfig, accountId }).config
-          .allowFrom ?? []
-      ).map((entry) => String(entry)),
-    formatAllowFrom: ({ allowFrom }) =>
-      allowFrom
-        .map((entry) => String(entry).trim())
-        .filter(Boolean)
-        .map((entry) => entry.replace(/^(wework|wecom|qywx|ww):/i, ""))
-        .map((entry) => entry.toLowerCase()),
-  },
+      buildAccountSnapshot: ({ account, runtime }) => ({
+        accountId: account.accountId,
+        name: account.name,
+        enabled: account.enabled,
+        configured: Boolean(account.baseUrl?.trim()),
+        running: runtime?.running ?? false,
+        lastStartAt: runtime?.lastStartAt ?? null,
+        lastStopAt: runtime?.lastStopAt ?? null,
+        lastError: runtime?.lastError ?? null,
+        mode: "webhook",
+        lastInboundAt: runtime?.lastInboundAt ?? null,
+        lastOutboundAt: runtime?.lastOutboundAt ?? null,
+        dmPolicy: account.config.dmPolicy ?? "pairing",
+        groupPolicy: account.config.groupPolicy ?? "open",
+        baseUrl: account.baseUrl,
+      }),
+      probeAccount: async ({ account, timeoutMs }) =>
+        probeWework(account.baseUrl, timeoutMs),
+    },
+    gateway: {
+      startAccount: async (ctx) => {
+        const account = ctx.account;
+        ctx.log?.info(`[${account.accountId}] starting wework provider`);
+        const { stop } = await monitorWeworkProvider({
+          account,
+          config: ctx.cfg as OpenClawConfig,
+          runtime: ctx.runtime,
+          abortSignal: ctx.abortSignal,
+          statusSink: (patch) =>
+            ctx.setStatus({ accountId: ctx.accountId, ...patch }),
+        });
+        await waitForAbortSignal(ctx.abortSignal);
+        await stop();
+      },
+    },
+  }),
   security: {
     resolveDmPolicy: ({ cfg, accountId, account }) => {
       const resolvedAccountId =
@@ -159,162 +370,8 @@ export const weworkPlugin: ChannelPlugin<ResolvedWeworkAccount> = {
       };
     },
   },
-  groups: {
-    resolveRequireMention: () => false,
-  },
   threading: {
     resolveReplyToMode: () => "off",
-  },
-  actions: weworkMessageActions,
-  messaging: {
-    normalizeTarget: normalizeWeworkMessagingTarget,
-    targetResolver: {
-      looksLikeId: (raw) => {
-        const trimmed = raw.trim();
-        return Boolean(trimmed);
-      },
-      hint: "<conversationId>",
-    },
-  },
-  directory: {
-    self: async () => null,
-    listPeers: async ({ cfg, accountId, query, limit }) => {
-      const account = resolveWeworkAccount({
-        cfg: cfg as OpenClawConfig,
-        accountId,
-      });
-      const q = query?.trim().toLowerCase() || "";
-      const response = await listWeworkContacts({
-        accountId: account.accountId,
-        pageNum: 1,
-        pageSize: limit && limit > 0 ? limit : 50,
-      });
-      if (!response) return [];
-      const payload =
-        (response as { raw?: unknown; data?: unknown })?.raw ?? response;
-      const data = (payload as { data?: unknown })?.data as
-        | { user_list?: Array<{ conversation_id?: string; username?: string }> }
-        | undefined;
-      const peers = (data?.user_list ?? [])
-        .map((entry) => ({
-          id: entry.conversation_id ?? "",
-          name: entry.username ?? "",
-        }))
-        .filter((entry) => entry.id)
-        .filter((entry) =>
-          q
-            ? entry.id.toLowerCase().includes(q) ||
-              entry.name.toLowerCase().includes(q)
-            : true,
-        )
-        .slice(0, limit && limit > 0 ? limit : undefined)
-        .map(
-          (entry) =>
-            ({ kind: "user", id: entry.id, name: entry.name }) as const,
-        );
-      return peers;
-    },
-    listGroups: async ({ cfg, accountId, query, limit }) => {
-      const account = resolveWeworkAccount({
-        cfg: cfg as OpenClawConfig,
-        accountId,
-      });
-      const q = query?.trim().toLowerCase() || "";
-      const response = await listWeworkGroups({
-        accountId: account.accountId,
-        pageNum: 1,
-        pageSize: limit && limit > 0 ? limit : 50,
-      });
-      if (!response) return [];
-      const payload =
-        (response as { raw?: unknown; data?: unknown })?.raw ?? response;
-      const data = (payload as { data?: unknown })?.data as
-        | { room_list?: Array<{ conversation_id?: string; nickname?: string }> }
-        | undefined;
-      const groups = (data?.room_list ?? [])
-        .map((entry) => ({
-          id: entry.conversation_id ?? "",
-          name: entry.nickname ?? "",
-        }))
-        .filter((entry) => entry.id)
-        .filter((entry) =>
-          q
-            ? entry.id.toLowerCase().includes(q) ||
-              entry.name.toLowerCase().includes(q)
-            : true,
-        )
-        .slice(0, limit && limit > 0 ? limit : undefined)
-        .map(
-          (entry) =>
-            ({ kind: "group", id: entry.id, name: entry.name }) as const,
-        );
-      return groups;
-    },
-  },
-  setup: {
-    resolveAccountId: ({ accountId }) => normalizeAccountId(accountId),
-    applyAccountName: ({ cfg, accountId, name }) =>
-      applyAccountNameToChannelSection({
-        cfg: cfg as OpenClawConfig,
-        channelKey: "wework",
-        accountId,
-        name,
-      }),
-    validateInput: ({ input }) => {
-      if (!input.baseUrl) return null;
-      return null;
-    },
-    applyAccountConfig: ({ cfg, accountId, input }) => {
-      const namedConfig = applyAccountNameToChannelSection({
-        cfg: cfg as OpenClawConfig,
-        channelKey: "wework",
-        accountId,
-        name: input.name,
-      });
-      const next =
-        accountId !== DEFAULT_ACCOUNT_ID
-          ? migrateBaseNameToDefaultAccount({
-              cfg: namedConfig,
-              channelKey: "wework",
-            })
-          : namedConfig;
-      const existing = resolveWeworkAccount({
-        cfg: next as OpenClawConfig,
-        accountId,
-      });
-      const baseUrl = input.baseUrl?.trim() || existing.baseUrl;
-      if (accountId === DEFAULT_ACCOUNT_ID) {
-        return {
-          ...next,
-          channels: {
-            ...next.channels,
-            wework: {
-              ...next.channels?.wework,
-              enabled: true,
-              baseUrl,
-            },
-          },
-        } as OpenClawConfig;
-      }
-      return {
-        ...next,
-        channels: {
-          ...next.channels,
-          wework: {
-            ...next.channels?.wework,
-            enabled: true,
-            accounts: {
-              ...(next.channels?.wework?.accounts ?? {}),
-              [accountId]: {
-                ...(next.channels?.wework?.accounts?.[accountId] ?? {}),
-                enabled: true,
-                baseUrl,
-              },
-            },
-          },
-        },
-      } as OpenClawConfig;
-    },
   },
   pairing: {
     idLabel: "weworkUserId",
@@ -416,58 +473,4 @@ export const weworkPlugin: ChannelPlugin<ResolvedWeworkAccount> = {
       };
     },
   },
-  status: {
-    defaultRuntime: {
-      accountId: DEFAULT_ACCOUNT_ID,
-      running: false,
-      lastStartAt: null,
-      lastStopAt: null,
-      lastError: null,
-    },
-    collectStatusIssues: (accounts) => collectWeworkStatusIssues(accounts),
-    buildChannelSummary: ({ snapshot }) => ({
-      configured: snapshot.configured ?? false,
-      running: snapshot.running ?? false,
-      mode: snapshot.mode ?? "webhook",
-      lastStartAt: snapshot.lastStartAt ?? null,
-      lastStopAt: snapshot.lastStopAt ?? null,
-      lastError: snapshot.lastError ?? null,
-      probe: snapshot.probe,
-      lastProbeAt: snapshot.lastProbeAt ?? null,
-    }),
-    probeAccount: async ({ account, timeoutMs }) =>
-      probeWework(account.baseUrl, timeoutMs),
-    buildAccountSnapshot: ({ account, runtime }) => ({
-      accountId: account.accountId,
-      name: account.name,
-      enabled: account.enabled,
-      configured: Boolean(account.baseUrl?.trim()),
-      running: runtime?.running ?? false,
-      lastStartAt: runtime?.lastStartAt ?? null,
-      lastStopAt: runtime?.lastStopAt ?? null,
-      lastError: runtime?.lastError ?? null,
-      mode: "webhook",
-      lastInboundAt: runtime?.lastInboundAt ?? null,
-      lastOutboundAt: runtime?.lastOutboundAt ?? null,
-      dmPolicy: account.config.dmPolicy ?? "pairing",
-      groupPolicy: account.config.groupPolicy ?? "open",
-      baseUrl: account.baseUrl,
-    }),
-  },
-  gateway: {
-    startAccount: async (ctx) => {
-      const account = ctx.account;
-      ctx.log?.info(`[${account.accountId}] starting wework provider`);
-      const { stop } = await monitorWeworkProvider({
-        account,
-        config: ctx.cfg as OpenClawConfig,
-        runtime: ctx.runtime,
-        abortSignal: ctx.abortSignal,
-        statusSink: (patch) =>
-          ctx.setStatus({ accountId: ctx.accountId, ...patch }),
-      });
-      await waitForAbortSignal(ctx.abortSignal);
-      await stop();
-    },
-  },
-};
+});
