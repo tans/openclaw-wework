@@ -10,7 +10,6 @@
     "compat": {
       "pluginApi": ">=2026.3.22"
     },
-    "setupEntry": "./setup-entry.ts",
     "channel": {
       "id": "wework",
       "label": "WeWork",

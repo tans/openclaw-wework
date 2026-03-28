@@ -33,7 +33,6 @@ describe("native plugin metadata", () => {
     expect(pluginManifest.kind).toBe("channel");
     expect(pluginManifest.channels).toEqual(["wework"]);
     expect(packageJson.openclaw.extensions).toEqual(["./index.ts"]);
-    expect(packageJson.openclaw.setupEntry).toBe("./setup-entry.ts");
   });
 
   it("uses the published package name in install documentation examples", () => {
