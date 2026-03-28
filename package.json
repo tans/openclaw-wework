@@ -46,7 +46,7 @@
     }
   },
   "devDependencies": {
-    "openclaw": "file:../../../openclaw",
+    "openclaw": "^2026.3.24",
     "vitest": "^4.1.0"
   }
 }
