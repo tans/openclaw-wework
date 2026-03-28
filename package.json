@@ -1,5 +1,5 @@
 {
-  "name": "@openclaw/wework",
+  "name": "openclaw-wework",
   "version": "2026.1.29",
   "type": "module",
   "description": "OpenClaw WeWork channel plugin",
@@ -7,6 +7,9 @@
     "extensions": [
       "./index.ts"
     ],
+    "compat": {
+      "pluginApi": ">=2026.1.26"
+    },
     "setupEntry": "./setup-entry.ts",
     "channel": {
       "id": "wework",
@@ -23,7 +26,7 @@
       "quickstartAllowFrom": true
     },
     "install": {
-      "npmSpec": "@openclaw/wework",
+      "npmSpec": "@tans/openclaw-wework",
       "localPath": "extensions/wework",
       "defaultChoice": "npm"
     }

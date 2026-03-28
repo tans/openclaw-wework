@@ -4,7 +4,7 @@ import { weworkPlugin } from "./src/channel.js";
 import { setWeworkRuntime } from "./src/runtime.js";
 
 export default defineChannelPluginEntry({
-  id: "wework",
+  id: "openclaw-wework",
   name: "WeWork",
   description: "WeWork channel plugin",
   plugin: weworkPlugin,
