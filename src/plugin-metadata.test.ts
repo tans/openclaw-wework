@@ -35,4 +35,12 @@ describe("native plugin metadata", () => {
     expect(packageJson.openclaw.extensions).toEqual(["./index.ts"]);
     expect(packageJson.openclaw.setupEntry).toBe("./setup-entry.ts");
   });
+
+  it("uses the published package name in install documentation examples", () => {
+    const readme = readFileSync(path.join(rootDir, "README.md"), "utf8");
+    expect(readme).toContain("openclaw plugins install @tans/openclaw-wework");
+    expect(readme).toContain("openclaw plugins install --link /path/to/openclaw-wework");
+    expect(readme).toContain("cp -R . ~/.openclaw/extensions/openclaw-wework");
+    expect(readme).toContain("cd ~/.openclaw/extensions/openclaw-wework && npm install");
+  });
 });
