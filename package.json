@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-wework",
+  "name": "@tans/openclaw-wework",
   "version": "2026.1.29",
   "type": "module",
   "description": "OpenClaw WeWork channel plugin",
@@ -8,7 +8,7 @@
       "./index.ts"
     ],
     "compat": {
-      "pluginApi": ">=2026.1.26"
+      "pluginApi": ">=2026.3.22"
     },
     "setupEntry": "./setup-entry.ts",
     "channel": {
@@ -28,16 +28,26 @@
     "install": {
       "npmSpec": "@tans/openclaw-wework",
       "localPath": "extensions/wework",
-      "defaultChoice": "npm"
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.3.22"
+    },
+    "release": {
+      "publishToNpm": true
     }
   },
   "dependencies": {
     "undici": "7.19.0"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.1.26"
+    "openclaw": ">=2026.3.22"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "openclaw": "workspace:*"
+    "openclaw": "file:../../../openclaw",
+    "vitest": "^4.1.0"
   }
 }
